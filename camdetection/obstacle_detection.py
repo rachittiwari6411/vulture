@@ -73,6 +73,34 @@ def run_camera(camera_index=0, width=640, grid_rows=2, grid_cols=2, show=True):
 
             ratios = sector_free_ratios(occ_mask, grid_rows=grid_rows, grid_cols=grid_cols)
 
+            # detect pink color regions in the frame and determine which sector they are in
+            hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+            # HSV range for pink/magenta (may need tuning per camera/lighting)
+            lower_pink = np.array([140, 30, 30])
+            upper_pink = np.array([170, 255, 255])
+            pink_mask = cv2.inRange(hsv, lower_pink, upper_pink)
+            # clean up mask
+            pm = cv2.morphologyEx(pink_mask, cv2.MORPH_OPEN, kernel, iterations=1)
+            pm = cv2.morphologyEx(pm, cv2.MORPH_CLOSE, kernel, iterations=1)
+
+            pink_contours, _ = cv2.findContours(pm, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            pink_sector = None
+            pink_centroid = None
+            # pick the largest pink contour (if any) above area threshold
+            if pink_contours:
+                largest = max(pink_contours, key=cv2.contourArea)
+                if cv2.contourArea(largest) > 300:
+                    M = cv2.moments(largest)
+                    if M.get('m00', 0) != 0:
+                        cx = int(M['m10'] / M['m00'])
+                        cy = int(M['m01'] / M['m00'])
+                        pink_centroid = (cx, cy)
+                        # determine which sector contains the centroid
+                        for r, x1, y1, x2, y2, row, col in ratios:
+                            if cx >= x1 and cx < x2 and cy >= y1 and cy < y2:
+                                pink_sector = (row, col)
+                                break
+
             now = time.time()
             if now - last_print >= print_interval:
                 status = []
@@ -88,6 +116,21 @@ def run_camera(camera_index=0, width=640, grid_rows=2, grid_cols=2, show=True):
                 label = f"{int(r*100)}% {human_label(r)}"
                 cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 0, 0), 2)
                 cv2.putText(overlay, label, (x1 + 5, y1 + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+            # overlay for pink detection: draw centroid and sector
+            if pink_centroid is not None:
+                cx, cy = pink_centroid
+                cv2.drawContours(overlay, [largest], -1, (255, 0, 255), 2)
+                cv2.circle(overlay, (cx, cy), 6, (255, 0, 255), -1)
+                if pink_sector is not None:
+                    srow, scol = pink_sector
+                    txt = f"Pink -> [{srow},{scol}]"
+                else:
+                    txt = "Pink -> Unknown"
+                cv2.putText(overlay, txt, (cx + 10, cy - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 255), 2)
+            else:
+                # small legend to show pink detection state
+                cv2.putText(overlay, "Pink: none", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 255), 2)
 
             # draw contours of detected obstacles
             contours, _ = cv2.findContours(clean, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
