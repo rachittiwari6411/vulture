@@ -8,7 +8,7 @@ run = True
 x, y = 0, 0
 vel = 5
 
-server_ip = "http://100.68.226.61:8000"
+server_ip = "http://rachitpi:8000"
 
 req = requests.post(server_ip, json={"message": "Program started"})
 
